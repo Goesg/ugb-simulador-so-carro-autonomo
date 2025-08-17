@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SO de Carro Autônomo — Simulação S.O UGB</title>
+  <style>
+    :root {
+      --bg:#0f1115; --panel:#161a22; --muted:#8a94a7; --text:#e6edf3; --accent:#7aa2f7; --ok:#4ade80; --warn:#facc15; --err:#f87171;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--text); }
+    header { padding:16px 20px; border-bottom:1px solid #222837; background:linear-gradient(180deg,#121622,#0f1115); position:sticky; top:0; z-index:10; }
+    header h1 { margin:0; font-size:18px; letter-spacing:.2px; }
+    header .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+    main { display:grid; grid-template-columns: 320px 1fr 420px; gap:14px; padding:14px; }
+    .panel { background:var(--panel); border:1px solid #222837; border-radius:12px; overflow:hidden; }
+    .panel h2 { margin:0; padding:10px 12px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; border-bottom:1px solid #222837; color:#cbd5e1; }
+    .controls { padding:12px; display:grid; gap:10px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { background:#1c2333; color:var(--text); border:1px solid #2a3247; padding:10px 12px; border-radius:10px; cursor:pointer; font-weight:600; transition:all .15s ease; }
+    button:hover { transform:translateY(-1px); border-color:#3a4460; }
+    button:disabled { opacity:.5; cursor:not-allowed; filter:saturate(.5); }
+    .accent { border-color:#3a63ff; }
+    .ok { border-color:#2e7d32; }
+    .warn { border-color:#b08900; }
+    .err { border-color:#a23535; }
+    .canvas-wrap { position:relative; height: 520px; }
+    canvas { width:100%; height:100%; display:block; background: conic-gradient(from 180deg at 50% 50%, #0d1117, #0b0f14); border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
+    .hud { display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; padding:10px 12px; font-variant-numeric: tabular-nums; }
+    .hud .kv { background:#111520; border:1px solid #222837; border-radius:8px; padding:8px 10px; }
+    .kv .k { color:#9aa6b2; font-size:12px; }
+    .kv .v { font-weight:700; font-size:14px; }
+    .log { height:520px; overflow:auto; padding:10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#0e121b; }
+    .log-line { margin:0; padding:6px 8px; border-left:3px solid #2a3247; }
+    .t-ROUTINE { border-color: var(--accent); }
+    .t-SYSCALL { border-color: #34d399; }
+    .t-DRIVER { border-color: #60a5fa; }
+    .t-HW { border-color: #f59e0b; }
+    .t-FEEDBACK { border-color: #94a3b8; color:#cbd5e1; }
+    .muted { color: var(--muted); }
+    .footer { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-top:1px solid #222837; color:#9aa6b2; font-size:12px; }
+    .badge { padding:2px 6px; border:1px solid #2a3247; border-radius:999px; }
+    .switch { display:flex; align-items:center; gap:8px; }
+    .switch input { accent-color:#3a63ff; }
+    .overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(12,16,24,.45); backdrop-filter: blur(2px); z-index:5; }
+    .overlay.show { display:flex; }
+    .overlay .chip { background:#0f172a; border:1px solid #334155; color:#cbd5e1; padding:10px 14px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+    .kbd { font-family: ui-monospace, Menlo, Consolas, monospace; background:#0b1220; border:1px solid #26314a; padding:1px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Projeto de Simulação S.O carro autônomo UGB</h1>
+    <div class="sub">Rotinas de alto nível → HAL (API estável) → Driver (tradução) → "Hardware" (modelo físico). Ackermann simplificado, tempo real no <code>requestAnimationFrame</code>.</div>
+  </header>
+
+  <main>
+    <!-- CONTROLES / CAMADAS DE SOFTWARE -->
+    <section class="panel">
+      <h2>Controles & Rotinas</h2>
+      <div class="controls">
+        <div class="row">
+          <button id="btnRight" class="accent">Virar 90° Direita</button>
+          <button id="btnLeft" class="accent">Virar 90° Esquerda</button>
+        </div>
+        <div class="row">
+          <button id="btnAccel" class="ok">Acelerar</button>
+          <button id="btnBrake" class="warn">Frear</button>
+          <button id="btnReverse" class="err">Ré 1 m</button>
+        </div>
+        <div class="row">
+          <button id="btnPark" class="accent">Estacionar (demo)</button>
+        </div>
+        <div class="row">
+          <button id="btnStop">Parar Tudo</button>
+          <button id="btnClear">Limpar Log</button>
+        </div>
+        <div class="row" style="margin-top:6px; color:#9aa6b2">
+          Atalhos: <span class="kbd">R</span>=dir, <span class="kbd">L</span>=esq, <span class="kbd">P</span>=park, <span class="kbd">B</span>=frear
+        </div>
+      </div>
+      <div class="footer">
+        <span class="badge">Camada: Rotinas</span>
+        <span>Mostra chamadas → <em>syscall</em> → driver → hardware no log</span>
+      </div>
+    </section>
+
+    <!-- SIMULADOR / "HARDWARE" VISUAL -->
+    <section class="panel">
+      <h2>Simulador (Ackermann simplificado)</h2>
+      <div class="canvas-wrap">
+        <canvas id="view" width="900" height="520" aria-label="Cena 2D"></canvas>
+        <div class="overlay" id="overlay"><div class="chip">Executando rotina…</div></div>
+      </div>
+      <div class="hud" id="hud">
+        <div class="kv"><div class="k">Velocidade</div><div class="v" id="vSpeed">0.00 m/s (0.0 km/h)</div></div>
+        <div class="kv"><div class="k">Esterço</div><div class="v" id="vSteer">0.0°</div></div>
+        <div class="kv"><div class="k">Yaw (rumo)</div><div class="v" id="vYaw">0.0°</div></div>
+        <div class="kv"><div class="k">Marcha</div><div class="v" id="vGear">D</div></div>
+        <div class="kv"><div class="k">Rotina</div><div class="v" id="vRoutine">—</div></div>
+        <div class="kv switch"><label><input type="checkbox" id="chkPath"/> Traçar trajetória</label></div>
+      </div>
+      <div class="footer"><span class="badge">Camada: "Hardware"</span><span class="muted">Modelo planar 2D; ω = v·tan(δ)/L</span></div>
+    </section>
+
+    <!-- LOG DE EVENTOS / CAMADAS INTERMEDIÁRIAS -->
+    <section class="panel">
+      <h2>Console de Eventos (Rotina → Syscall → Driver → Hardware)</h2>
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="footer"><span class="badge">Camadas: API / Driver</span><span>Máx. 300 linhas</span></div>
+    </section>
+  </main>
+
+  <script>
+  // ===== Utilidades gerais =====
+  const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
+  const toRad = deg => deg * Math.PI / 180;
+  const toDeg = rad => rad * 180 / Math.PI;
+  const normDeg = deg => ((deg % 360) + 360) % 360;
+
+  function nowTs(){ return performance.now(); }
+
+  // Logger estruturado
+  const logEl = document.getElementById('log');
+  function log(type, msg, data){
+    const time = new Date().toLocaleTimeString();
+    const el = document.createElement('div');
+    el.className = `log-line t-${type}`;
+    const payload = data ? ' ' + JSON.stringify(data) : '';
+    el.textContent = `[${time}] ${type.padEnd(8)} ${msg}${payload}`;
+    logEl.appendChild(el);
+    // rolagem
+    logEl.scrollTop = logEl.scrollHeight;
+    // limitar tamanho
+    const max = 300; while (logEl.children.length > max) logEl.removeChild(logEl.firstChild);
+  }
+
+  // ===== "Hardware" — modelo de carro Ackermann simplificado =====
+  class Car {
+    constructor(){
+      this.x = 5; this.y = 8; // m
+      this.heading = 0; // rad (0 = +X)
+      this.speed = 0; // m/s (assinada pelo sentido do heading)
+      this.steer = 0; // rad (+ = direita)
+      this.gear = 1; // 1 = drive, -1 = ré
+      this.path = [];
+      // Parâmetros físicos (simplificados)
+      this.L = 2.7; // entre-eixos (m)
+      this.maxSpeed = 4.0; // m/s (~14.4 km/h)
+      this.accelRate = 1.6; // m/s^2
+      this.brakeRate = 6.0; // m/s^2
+      this.maxSteerDeg = 35; // graus
+      this.size = { w: 4.2, h: 1.9 }; // m (desenho)
+    }
+    update(dt, driver){
+      // 1) Atualizar velocidade rumo ao alvo
+      const target = this.gear * clamp(driver.targetSpeed, 0, this.maxSpeed);
+      const dv = clamp(target - this.speed, -this.accelRate*dt, this.accelRate*dt);
+      this.speed += dv;
+      // 1b) Freio sempre puxa para 0
+      if (driver.brake > 0){
+        const sign = Math.sign(this.speed);
+        const mag = Math.max(0, Math.abs(this.speed) - this.brakeRate*driver.brake*dt);
+        this.speed = mag * sign;
+      }
+      // 2) Atualizar esterço (sem limitação dinâmica para simplificar)
+      this.steer = clamp(driver.steering, toRad(-this.maxSteerDeg), toRad(+this.maxSteerDeg));
+      // 3) Cinemática Ackermann no plano
+      const v = this.speed;
+      const beta = Math.tan(this.steer);
+      const omega = (Math.abs(this.steer) < 1e-4) ? 0 : (v * beta / this.L);
+      this.heading += omega * dt;
+      this.x += v * Math.cos(this.heading) * dt;
+      this.y += v * Math.sin(this.heading) * dt;
+      // 4) Armazenar trilha (opcional)
+      if (driver.tracePath){
+        this.path.push([this.x, this.y]);
+        if (this.path.length > 2000) this.path.shift();
+      }
+    }
+  }
+
+  // ===== Driver (tradução API → atuadores / mensagens) =====
+  class Driver {
+    constructor(car){
+      this.car = car;
+      this.targetSpeed = 0; // m/s (magnitude)
+      this.steering = 0;    // rad
+      this.brake = 0;       // 0..1
+      this.tracePath = false;
+    }
+    setCruisingSpeed(mps){
+      this.targetSpeed = clamp(mps, 0, this.car.maxSpeed);
+      log('DRIVER', 'setCruisingSpeed', { mps: +mps.toFixed(2) });
+    }
+    setSteeringAngle(rad){
+      this.steering = clamp(rad, toRad(-this.car.maxSteerDeg), toRad(+this.car.maxSteerDeg));
+      log('DRIVER', 'setSteeringAngle', { deg: +toDeg(this.steering).toFixed(1) });
+    }
+    setBrakeIntensity(k){ // 0..1
+      this.brake = clamp(k, 0, 1);
+      log('DRIVER', 'setBrakeIntensity', { k: +this.brake.toFixed(2) });
+    }
+    setGear(g){
+      this.car.gear = (g >= 0) ? 1 : -1;
+      log('DRIVER', 'setGear', { gear: (this.car.gear===1?'D':'R') });
+    }
+  }
+
+  // ===== HAL (API estável chamada pelas Rotinas) =====
+  class HAL {
+    constructor(driver, car){ this.d = driver; this.car = car; }
+    // Conveniências de unidade
+    deg2rad(d){ return toRad(d); }
+    rad2deg(r){ return toDeg(r); }
+
+    // Syscalls "automotivas"
+    setSteeringAngleDeg(deg){ log('SYSCALL', 'setSteeringAngleDeg', {deg}); this.d.setSteeringAngle(this.deg2rad(deg)); }
+    setTargetSpeedMps(mps){ log('SYSCALL', 'setTargetSpeedMps', {mps:+mps.toFixed(2)}); this.d.setCruisingSpeed(mps); }
+    applyBrake(percent){ const k=clamp(percent/100,0,1); log('SYSCALL','applyBrake',{percent}); this.d.setBrakeIntensity(k); }
+    setGearDrive(){ log('SYSCALL','setGearDrive'); this.d.setGear(+1); }
+    setGearReverse(){ log('SYSCALL','setGearReverse'); this.d.setGear(-1); }
+
+    // Feedback
+    yawDeg(){ return normDeg(toDeg(this.car.heading)); }
+    speedMps(){ return this.car.speed; }
+  }
+
+  // ===== Roteiro / Rotinas de alto nível (assíncronas) =====
+  class Routines {
+    constructor(hal){ this.hal = hal; this.running = false; this.abort = false; }
+
+    async run(fn, name){
+      if (this.running) return;
+      this.running = true; this.abort = false; setRoutineName(name);
+      overlay(true); log('ROUTINE', `start ${name}`);
+      try { await fn(); } finally { overlay(false); setRoutineName('—'); this.running=false; log('ROUTINE', `end ${name}`); }
+    }
+    stop(){ this.abort = true; this.hal.setTargetSpeedMps(0); this.hal.applyBrake(100); }
+
+    async waitSeconds(sec){
+      const t0 = nowTs();
+      while(!this.abort && (nowTs()-t0) < sec*1000){ await frame(); }
+    }
+
+    // ===== Rotinas =====
+    accelerate = async (mps=1.2) => {
+      await this.run(async () => {
+        this.hal.setGearDrive(); this.hal.applyBrake(0); this.hal.setTargetSpeedMps(mps);
+        await this.waitSeconds(1.0);
+      }, 'accelerate');
+    }
+
+    brake = async (intensity=90) => {
+      await this.run(async () => {
+        this.hal.applyBrake(intensity); this.hal.setTargetSpeedMps(0);
+        await this.waitSeconds(0.7);
+        this.hal.applyBrake(0);
+      }, 'brake');
+    }
+
+    reverse = async (meters=1.0, speed=0.8) => {
+      await this.run(async () => {
+        this.hal.setGearReverse(); this.hal.applyBrake(0); this.hal.setTargetSpeedMps(speed);
+        let dist=0, lastTs=nowTs();
+        while(!this.abort && dist < meters){
+          await frame();
+          const ts=nowTs(); const dt=(ts-lastTs)/1000; lastTs=ts;
+          dist += Math.abs(this.hal.speedMps()) * dt;
+        }
+        this.hal.setTargetSpeedMps(0); this.hal.setGearDrive();
+      }, 'reverse');
+    }
+
+    turnRight90 = async (speed=1.0, steerDeg=35, L=2.7) => {
+      await this.run(async () => {
+        const R = L / Math.tan(toRad(steerDeg));
+        const t = (Math.PI/2) * (R / speed);
+        this.hal.setSteeringAngleDeg(+Math.abs(steerDeg));
+        this.hal.setGearDrive(); this.hal.applyBrake(0); this.hal.setTargetSpeedMps(speed);
+        await this.waitSeconds(t);
+        this.hal.setTargetSpeedMps(0); this.hal.setSteeringAngleDeg(0);
+      }, 'turnRight90');
+    }
+
+    turnLeft90 = async (speed=1.0, steerDeg=35, L=2.7) => {
+      await this.run(async () => {
+        const R = L / Math.tan(toRad(steerDeg));
+        const t = (Math.PI/2) * (R / speed);
+        this.hal.setSteeringAngleDeg(-Math.abs(steerDeg));
+        this.hal.setGearDrive(); this.hal.applyBrake(0); this.hal.setTargetSpeedMps(speed);
+        await this.waitSeconds(t);
+        this.hal.setTargetSpeedMps(0); this.hal.setSteeringAngleDeg(0);
+      }, 'turnLeft90');
+    }
+
+    park = async () => {
+      await this.run(async () => {
+        // Behavior Tree didática (Sequence: Align → ReverseArc → Straighten → SecureStop)
+        log('ROUTINE','BT AlignToSlot');
+        this.hal.setGearDrive(); this.hal.setSteeringAngleDeg(0); this.hal.setTargetSpeedMps(1.0); await this.waitSeconds(1.0); this.hal.setTargetSpeedMps(0);
+
+        log('ROUTINE','BT ReverseArcIntoSlot');
+        this.hal.setSteeringAngleDeg(+35); await this.reverse(1.6, 0.6);
+
+        log('ROUTINE','BT StraightenInSlot');
+        this.hal.setSteeringAngleDeg(0); await this.reverse(0.5, 0.4);
+
+        log('ROUTINE','BT SecureStop');
+        await this.brake(100);
+      }, 'park');
+    }
+  }
+
+  // ===== Engine (render + loop) =====
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  const car = new Car();
+  const driver = new Driver(car);
+  const hal = new HAL(driver, car);
+  const routines = new Routines(hal);
+  let lastTs = nowTs();
+
+  function metersToPx(m){ return m * 30; }
+  function worldToScreen(x,y){ return [metersToPx(x)+60, canvas.height - (metersToPx(y)+60)]; }
+
+  function drawGrid(){
+    ctx.save();
+    ctx.strokeStyle = '#1c2330'; ctx.lineWidth = 1;
+    const step = metersToPx(1);
+    for (let x=0; x<canvas.width; x+=step){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+    for (let y=0; y<canvas.height; y+=step){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function drawCar(){
+    const [sx, sy] = worldToScreen(car.x, car.y);
+    const w = metersToPx(car.size.w), h = metersToPx(car.size.h);
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(-car.heading); // canvas y cresce p/ baixo
+    // corpo
+    ctx.fillStyle = '#2b3348'; ctx.strokeStyle = '#5870ff'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.roundRect(-w/2, -h/2, w, h, 10); ctx.fill(); ctx.stroke();
+    // frente
+    ctx.fillStyle = '#8ab4ff'; ctx.fillRect(w/2 - 8, -h/4, 8, h/2);
+    // rodas dianteiras com esterço
+    const rw = metersToPx(0.8), rh = metersToPx(0.25);
+    const ax = metersToPx(car.size.w/2 - 0.6);
+    const ay = metersToPx(car.size.h/2 - 0.25);
+    ctx.save(); ctx.translate(+ax, -ay); ctx.rotate(-car.steer); ctx.fillStyle='#0e1628'; ctx.fillRect(-rw/2, -rh/2, rw, rh); ctx.restore();
+    ctx.save(); ctx.translate(+ax, +ay); ctx.rotate(-car.steer); ctx.fillStyle='#0e1628'; ctx.fillRect(-rw/2, -rh/2, rw, rh); ctx.restore();
+    // rodas traseiras
+    ctx.fillStyle='#0e1628'; ctx.fillRect(-ax-rw/2, -ay-rh/2, rw, rh);
+    ctx.fillRect(-ax-rw/2, +ay-rh/2, rw, rh);
+    ctx.restore();
+  }
+
+  function drawPath(){
+    if (!driver.tracePath || car.path.length < 2) return;
+    ctx.save(); ctx.strokeStyle='#2dd4bf88'; ctx.lineWidth=2;
+    ctx.beginPath();
+    for (let i=0;i<car.path.length;i++){
+      const [x,y]=worldToScreen(car.path[i][0], car.path[i][1]);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+
+  function render(){
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    drawGrid();
+    drawPath();
+    drawCar();
+  }
+
+  function update(dt){ car.update(dt, driver); updateHUD(); }
+
+  function updateHUD(){
+    const sp = document.getElementById('vSpeed');
+    const st = document.getElementById('vSteer');
+    const ya = document.getElementById('vYaw');
+    const ge = document.getElementById('vGear');
+    sp.textContent = `${Math.abs(car.speed).toFixed(2)} m/s (${(Math.abs(car.speed)*3.6).toFixed(1)} km/h)`;
+    st.textContent = `${toDeg(driver.steering).toFixed(1)}°`;
+    ya.textContent = `${normDeg(toDeg(car.heading)).toFixed(1)}°`;
+    ge.textContent = car.gear===1?'D':'R';
+  }
+
+  function frame(){
+    return new Promise(resolve => requestAnimationFrame(ts => {
+      const dt = Math.min(0.05, (ts - lastTs)/1000); // cap 50 ms
+      lastTs = ts;
+      update(dt);
+      render();
+      resolve(ts);
+    }));
+  }
+
+  // ===== UI wiring =====
+  const overlayEl = document.getElementById('overlay');
+  function overlay(show){ overlayEl.classList.toggle('show', !!show); }
+  function setRoutineName(name){ document.getElementById('vRoutine').textContent = name; }
+
+  document.getElementById('btnRight').onclick = () => routines.turnRight90();
+  document.getElementById('btnLeft').onclick = () => routines.turnLeft90();
+  document.getElementById('btnAccel').onclick = () => routines.accelerate();
+  document.getElementById('btnBrake').onclick = () => routines.brake();
+  document.getElementById('btnReverse').onclick = () => routines.reverse();
+  document.getElementById('btnPark').onclick = () => routines.park();
+  document.getElementById('btnStop').onclick = () => routines.stop();
+  document.getElementById('btnClear').onclick = () => (logEl.innerHTML = '');
+  document.getElementById('chkPath').onchange = e => driver.tracePath = e.target.checked;
+
+  // teclas
+  window.addEventListener('keydown', (e)=>{
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k==='r') routines.turnRight90();
+    if (k==='l') routines.turnLeft90();
+    if (k==='b') routines.brake();
+    if (k==='p') routines.park();
+  });
+
+  // Boot
+  log('FEEDBACK', 'Inicializando demo…');
+  (async function loop(){ while(true){ await frame(); } })();
+  </script>
+</body>
+</html>
